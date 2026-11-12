@@ -154,29 +154,35 @@ function toggle(span,item){
    const saveWord=()=>{if(Object.prototype.hasOwnProperty.call(saved,key))delete saved[key];else saved[key]=zh;store.set('wi-saved',JSON.stringify(saved));word.classList.toggle('saved',Object.prototype.hasOwnProperty.call(saved,key));refreshSavedHighlights();renderSaved()};
    const tap=()=>{const now=Date.now();if(now-lastTap<350){clearTimeout(tapTimer);tapTimer=null;lastTap=0;speak(text)}else{lastTap=now;clearTimeout(tapTimer);tapTimer=setTimeout(()=>{lastTap=0;tapTimer=null;saveWord()},350)}};
    const reset=()=>{clearTimeout(pressTimer);pressTimer=null;start=null;longPressed=false;swipeReady=false;moved=false;word.classList.remove('word-press-ready','word-swipe-ready')};
-   // Prefer the Clipboard API on each gesture. Do not create/focus temporary
-   // textareas on success: iOS Safari can retain their selection across gestures.
+   // Synchronous selection-based copy runs during the touchend user gesture.
+   // A single reusable textarea avoids repeated focus/selection churn on iOS.
    const copyWord=()=>{
      if(!text)return;
-     const success=()=>{word.classList.remove('word-copy-error');word.classList.add('word-copied');setTimeout(()=>word.classList.remove('word-copied'),1100)};
-     const failure=()=>{word.classList.add('word-copy-error');setTimeout(()=>word.classList.remove('word-copy-error'),1100)};
-     const legacy=()=>{
-       const previous=document.activeElement;
-       const input=document.createElement('textarea');
-       input.value=text;input.setAttribute('readonly','');
-       input.style.cssText='position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;';
-       document.body.appendChild(input);input.focus();input.select();
-       let ok=false;
-       try{ok=document.execCommand('copy')}catch(err){}
-       input.remove();
-       window.getSelection()?.removeAllRanges();
-       if(previous&&previous!==document.body&&previous.isConnected&&typeof previous.focus==='function')previous.focus({preventScroll:true});
-       if(ok)success();else failure();
+     const success=()=>{
+       word.classList.remove('word-copy-error');word.classList.add('word-copied');
+       setTimeout(()=>word.classList.remove('word-copied'),1100);
      };
-     if(navigator.clipboard&&typeof navigator.clipboard.writeText==='function'&&window.isSecureContext){
-       // Must start immediately within touchend, before timers or other awaits.
-       navigator.clipboard.writeText(text).then(success,legacy);
-     }else legacy();
+     const failure=()=>{
+       word.classList.add('word-copy-error');
+       setTimeout(()=>word.classList.remove('word-copy-error'),1100);
+     };
+     let input=document.getElementById('word-copy-input');
+     if(!input){
+       input=document.createElement('textarea');input.id='word-copy-input';
+       input.setAttribute('readonly','');
+       input.style.cssText='position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;font-size:16px;pointer-events:none;';
+       document.body.appendChild(input);
+     }
+     input.value=text;
+     input.focus({preventScroll:true});
+     input.select();input.setSelectionRange(0,text.length);
+     let ok=false;
+     try{ok=document.execCommand('copy')}catch(err){}
+     if(ok){success();return}
+     // Only try the asynchronous API when synchronous copying did not succeed.
+     if(navigator.clipboard?.writeText && window.isSecureContext){
+       navigator.clipboard.writeText(text).then(success,failure);
+     }else failure();
    };
    word.addEventListener('touchstart',e=>{
      if(e.touches.length!==1)return;reset();lastTouch=Date.now();start={x:e.touches[0].clientX,y:e.touches[0].clientY};
@@ -191,9 +197,9 @@ function toggle(span,item){
    word.addEventListener('touchend',e=>{
      if(!start)return;
      const doCopy=longPressed&&swipeReady,doTap=!longPressed&&!moved;
-     reset();lastTouch=Date.now();
      if(doCopy){if(e.cancelable)e.preventDefault();e.stopPropagation();copyWord()}
-     else if(doTap){e.stopPropagation();tap()}
+     reset();lastTouch=Date.now();
+     if(doTap){e.stopPropagation();tap()}
    },{passive:false});
    word.addEventListener('touchcancel',()=>{lastTouch=Date.now();reset()});
    word.addEventListener('click',e=>{e.stopPropagation();if(Date.now()-lastTouch<900){e.preventDefault();return}tap()});
