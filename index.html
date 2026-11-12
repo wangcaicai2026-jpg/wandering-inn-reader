@@ -148,11 +148,11 @@ function toggle(span,item){
    const original=originalForms[key];
    const ipa=lexicon[key]?.[1]||'';
    word.innerHTML='<span class="en">'+escape(en)+'</span>'+(ipa?'<span class="ipa-inline">'+escape(ipa)+'</span>':'')+'<span class="zh">'+escape(zh)+'</span>'+(original?'<span class="word-base">原形：'+escape(original)+'</span>':'');
-   word.title='单击收藏；双击朗读；长按后向右滑动复制';
+   word.title='单击单词收藏；双击单词复制；点击音标朗读';
    let tapTimer=null,lastTap=0,pressTimer=null,start=null,longPressed=false,swipeReady=false,moved=false,lastTouch=0;
    const text=en.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g,'');
    const saveWord=()=>{if(Object.prototype.hasOwnProperty.call(saved,key))delete saved[key];else saved[key]=zh;store.set('wi-saved',JSON.stringify(saved));word.classList.toggle('saved',Object.prototype.hasOwnProperty.call(saved,key));refreshSavedHighlights();renderSaved()};
-   const tap=()=>{const now=Date.now();if(now-lastTap<350){clearTimeout(tapTimer);tapTimer=null;lastTap=0;speak(text)}else{lastTap=now;clearTimeout(tapTimer);tapTimer=setTimeout(()=>{lastTap=0;tapTimer=null;saveWord()},350)}};
+   const tap=()=>{const now=Date.now();if(now-lastTap<350){clearTimeout(tapTimer);tapTimer=null;lastTap=0;copyWord()}else{lastTap=now;clearTimeout(tapTimer);tapTimer=setTimeout(()=>{lastTap=0;tapTimer=null;saveWord()},350)}};
    const reset=()=>{clearTimeout(pressTimer);pressTimer=null;start=null;longPressed=false;swipeReady=false;moved=false;word.classList.remove('word-press-ready','word-swipe-ready')};
    // Synchronous selection-based copy runs during the touchend user gesture.
    // A single reusable textarea avoids repeated focus/selection churn on iOS.
@@ -184,25 +184,43 @@ function toggle(span,item){
        navigator.clipboard.writeText(text).then(success,failure);
      }else failure();
    };
+   // Tapping IPA is separate from tapping the word: it never changes saved state.
+   const ipaElement=word.querySelector('.ipa-inline');
+   if(ipaElement){
+     ipaElement.style.cursor='pointer';
+     ipaElement.setAttribute('role','button');
+     ipaElement.setAttribute('aria-label','朗读 '+text);
+     ipaElement.addEventListener('touchend',e=>{
+       e.preventDefault();e.stopPropagation();lastTouch=Date.now();
+       clearTimeout(tapTimer);tapTimer=null;lastTap=0;speak(text);
+     },{passive:false});
+     ipaElement.addEventListener('click',e=>{
+       e.preventDefault();e.stopPropagation();
+       if(Date.now()-lastTouch>700)speak(text);
+     });
+   }
    word.addEventListener('touchstart',e=>{
-     if(e.touches.length!==1)return;reset();lastTouch=Date.now();start={x:e.touches[0].clientX,y:e.touches[0].clientY};
-     pressTimer=setTimeout(()=>{longPressed=true;clearTimeout(tapTimer);tapTimer=null;lastTap=0;word.classList.add('word-press-ready')},550);
+     if(e.target.closest('.ipa-inline'))return;
+     if(e.touches.length!==1)return;
+     start={x:e.touches[0].clientX,y:e.touches[0].clientY};moved=false;
    },{passive:true});
    word.addEventListener('touchmove',e=>{
      if(!start||!e.touches.length)return;
-     const dx=e.touches[0].clientX-start.x,dy=e.touches[0].clientY-start.y;
-     if(!longPressed){if(Math.hypot(dx,dy)>12){moved=true;clearTimeout(pressTimer)}}
-     else{swipeReady=dx>30&&Math.abs(dy)<65;word.classList.toggle('word-swipe-ready',swipeReady);if(swipeReady&&e.cancelable)e.preventDefault()}
-   },{passive:false});
+     if(Math.hypot(e.touches[0].clientX-start.x,e.touches[0].clientY-start.y)>12)moved=true;
+   },{passive:true});
    word.addEventListener('touchend',e=>{
+     if(e.target.closest('.ipa-inline'))return;
      if(!start)return;
-     const doCopy=longPressed&&swipeReady,doTap=!longPressed&&!moved;
-     if(doCopy){if(e.cancelable)e.preventDefault();e.stopPropagation();copyWord()}
-     reset();lastTouch=Date.now();
-     if(doTap){e.stopPropagation();tap()}
+     const shouldTap=!moved;start=null;lastTouch=Date.now();
+     if(shouldTap){e.preventDefault();e.stopPropagation();tap()}
    },{passive:false});
-   word.addEventListener('touchcancel',()=>{lastTouch=Date.now();reset()});
-   word.addEventListener('click',e=>{e.stopPropagation();if(Date.now()-lastTouch<900){e.preventDefault();return}tap()});
+   word.addEventListener('touchcancel',()=>{start=null;lastTouch=Date.now()});
+   word.addEventListener('click',e=>{
+     if(e.target.closest('.ipa-inline'))return;
+     e.stopPropagation();
+     if(Date.now()-lastTouch<900){e.preventDefault();return}
+     tap();
+   });
    word.addEventListener('dblclick',e=>{e.preventDefault();e.stopPropagation()});
    word.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation()});
    gloss.appendChild(word)
